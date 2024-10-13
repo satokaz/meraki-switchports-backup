@@ -4,7 +4,7 @@ import logging as log
 import json
 import re
 
-from meraki_sdk.meraki_sdk_client import MerakiSdkClient
+import meraki
 
 
 def filter_devices(device_list, key, val, case_sensitive=True):
@@ -68,12 +68,12 @@ if __name__ == "__main__":
         parser.print_help()
         exit(1)
 
-    client = MerakiSdkClient(args.api_key)
+    dashboard = meraki.DashboardAPI(args.api_key)
     organizationID = args.org_id
 
     if not organizationID:
         log.info("No Organization ID provided, I try to find one")
-        organizations = client.organizations.get_organizations()
+        organizations = dashboard.organizations.get_organizations()
         if len(organizations) != 1:
             print("API Token has access to no or more than one organization, please provide a organization id")
             print(organizations)
@@ -93,7 +93,7 @@ if __name__ == "__main__":
 
     if args.action == "backup":
         print("requesting devices")
-        devices = client.devices.get_organization_devices({"organization_id": organizationID})
+        devices = dashboard.organizations.getOrganizationDevices(organizationId=organizationID)
         print(" - Found %s devices in organization" % len(devices))
 
         with open(os.path.join(backup_dir, "_devices.json"), "w") as devices_json:
@@ -107,7 +107,7 @@ if __name__ == "__main__":
                 serial = device["serial"]
 
                 with open(os.path.join(backup_dir, "%s_ports.json" % serial), "w") as config:
-                    config.write(json.dumps(client.switch_ports.get_device_switch_ports(serial), indent=3, sort_keys=True))
+                    config.write(json.dumps(dashboard.switch.getDeviceSwitchPorts(serial), indent=3, sort_keys=True))
 
             else:
                 print("Skipping '%(name)s'(%(serial)s)" % device)
@@ -130,7 +130,7 @@ if __name__ == "__main__":
         local_devices = list(filter_devices(local_devices, filter_key, filter_value, case_sensitive))
         log.info("Matched %s devices in backup folder" % len(local_devices))
 
-        cloud_devices = client.devices.get_organization_devices({"organization_id": organizationID})
+        cloud_devices = dashboard.organizations.getOrganizationDevices(organizationId=organizationID)
         cloud_devices = list(filter_devices(cloud_devices, filter_key, filter_value, case_sensitive))
 
         log.info("Matched %s devices on cloud controller" % len(cloud_devices))
@@ -151,12 +151,10 @@ if __name__ == "__main__":
         log.info("Load Port configuration of '%(name)s'(%(serial)s)" % local_device)
 
         device_ports = json.load(open(os.path.join(backup_dir, "%s_ports.json" % serial), "r"))
+        print(" - Found %s ports" % len(device_ports))
 
         for port in device_ports:
-            print(" - restoring port %(number)s (%(name)s)" % port)
-
-            port_config = convertPortObject(port)
-
-            client.switch_ports.update_device_switch_port({"serial": cloud_device["serial"],
-                                                           "number": port["number"],
-                                                           "update_device_switch_port": port_config})
+            print(" - restoring port %(portId)s (%(name)s)" % port)
+            # print(port)
+            dashboard.switch.updateDeviceSwitchPort(serial=cloud_device["serial"], **port)
+        

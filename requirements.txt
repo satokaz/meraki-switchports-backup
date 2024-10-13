@@ -1,1 +1,1 @@
-meraki-sdk==1.5.0
+meraki==1.51.0
