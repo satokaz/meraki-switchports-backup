@@ -17,33 +17,11 @@ def filter_devices(device_list, key, val, case_sensitive=True):
         elif device_item.get(key, "").lower() == val and not case_sensitive:
             yield device_item
 
-
 def zerowidthsplit(pattern, string):
     splits = list(m.start() for m in re.finditer(pattern, string))
     starts = [0] + splits
     ends = splits + [ len(string) ]
     return [string[start:end] for start, end in zip(starts, ends)]
-
-
-def convertPortObject(port):
-    """Converts the port object to make it compatible with the Update Switch Port API Call"""
-    new_port = {}
-    camelCase = re.compile(r'(?<=[a-z])(?=[A-Z])')
-
-    for k, v in port.items():
-        if k == "":
-            continue
-
-        k = zerowidthsplit(r'(?<=[a-z])(?=[A-Z])', k)
-        new_key = "_".join(k).lower()
-        new_port[new_key] = v
-
-    new_port["mtype"] = new_port["type"]
-    del new_port["type"], new_port["number"]
-    new_port["storm_control_enabled"] = None
-
-    return new_port
-
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="""Small python script for backup and restore of meraki port configs.
@@ -105,9 +83,14 @@ if __name__ == "__main__":
             if model.startswith("MS"): # Filter meraki switches
                 print("Portconfig Backup of '%(name)s'(%(serial)s)" % device)
                 serial = device["serial"]
+                networkId = device["networkId"]
 
                 with open(os.path.join(backup_dir, "%s_ports.json" % serial), "w") as config:
                     config.write(json.dumps(dashboard.switch.getDeviceSwitchPorts(serial), indent=3, sort_keys=True))
+
+                # link aggregations
+                with open(os.path.join(backup_dir, "%s_link_aggregations.json" % serial), "w") as config:
+                    config.write(json.dumps(dashboard.switch.getNetworkSwitchLinkAggregations(networkId), indent=3, sort_keys=True))
 
             else:
                 print("Skipping '%(name)s'(%(serial)s)" % device)
@@ -158,3 +141,26 @@ if __name__ == "__main__":
             # print(port)
             dashboard.switch.updateDeviceSwitchPort(serial=cloud_device["serial"], **port)
         
+        # link aggregations
+        link_aggregations = json.load(open(os.path.join(backup_dir, "%s_link_aggregations.json" % serial), "r"))
+        print(" - Found %s link aggregations" % len(link_aggregations))
+        print(" - Found %s link aggregations" % link_aggregations)
+
+        # 既存のリンクアグリゲーションを取得
+        existing_link_aggregations = dashboard.switch.getNetworkSwitchLinkAggregations(networkId=cloud_device["networkId"])
+
+        for link_aggregation in link_aggregations:
+            link_aggregation_id = link_aggregation.get('id', None)
+
+            print(" - restoring link aggregation %(switchPorts)s " % link_aggregation)
+
+            # 既存のリンクアグリゲーションがあるか確認
+            if any(la['id'] == link_aggregation_id for la in existing_link_aggregations):
+                print(" - deleting existing link aggregation %(id)s" % {'id': link_aggregation_id})
+                # 既存のリンクアグリゲーションを削除
+                dashboard.switch.deleteNetworkSwitchLinkAggregation(networkId=cloud_device["networkId"],
+                                                                    linkAggregationId=link_aggregation_id)            
+            # 新しいリンクアグリゲーションを作成
+            print(" - creating link aggregation %(id)s" % {'id': link_aggregation_id})
+            dashboard.switch.createNetworkSwitchLinkAggregation(networkId=cloud_device["networkId"],
+                                                                **link_aggregation)
